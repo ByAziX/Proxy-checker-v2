@@ -32,7 +32,7 @@ export default function RootLayout({
       >
         <div className="flex min-h-screen">
           <Sidebar />
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 min-h-screen overflow-y-auto flex flex-col">
             <TopBar />
             {children}
           </div>
