@@ -1,6 +1,5 @@
 ﻿"use client";
 
-import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -8,41 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Globe2, Lock, ShieldAlert, ShieldCheck, Upload } from "lucide-react";
-
-const pages = [
-  {
-    href: "/apps",
-    title: "Applications et endpoints",
-    desc: "Cree tes applications et liste leurs URLs (web, API, fichiers).",
-    icon: <Globe2 className="size-5" />,
-  },
-  {
-    href: "/threat",
-    title: "Threat protection",
-    desc: "Tester l acces a des URLs a risque (depuis navigateur et serveur).",
-    icon: <ShieldAlert className="size-5" />,
-  },
-  {
-    href: "/dlp",
-    title: "DLP / exfiltration",
-    desc: "Simuler une exfiltration controlee pour verifier les blocages.",
-    icon: <Upload className="size-5" />,
-  },
-  {
-    href: "/browser-checks",
-    title: "Checks depuis le navigateur",
-    desc: "Verifier l acces aux sites stockes en base via ton reseau utilisateur.",
-    icon: <ShieldCheck className="size-5" />,
-  },
-  {
-    href: "/server-checks",
-    title: "Checks depuis le serveur",
-    desc: "Tester une URL cote backend pour comparer avec l utilisateur.",
-    icon: <Lock className="size-5" />,
-  },
-];
+import { Globe2 } from "lucide-react";
 
 const stats = [
   { label: "Sites suivis", value: "24" },
@@ -50,6 +15,14 @@ const stats = [
   { label: "Taux succes", value: "87%" },
   { label: "Latence nav.", value: "480 ms" },
   { label: "Latence serveur", value: "120 ms" },
+];
+
+const moduleStats = [
+  { name: "Applications", metric: "24 apps", uptime: "99.3%", blocked: "3 blocages", path: "/apps" },
+  { name: "Threat protection", metric: "12 urls", uptime: "98.1%", blocked: "1 blocage", path: "/threat" },
+  { name: "DLP / exfiltration", metric: "8 scenarios", uptime: "99.8%", blocked: "0 blocage", path: "/dlp" },
+  { name: "Checks navigateur", metric: "62 endpoints", uptime: "97.5%", blocked: "5 blocages", path: "/browser-checks" },
+  { name: "Checks serveur", metric: "62 endpoints", uptime: "99.1%", blocked: "2 blocages", path: "/server-checks" },
 ];
 
 export default function Home() {
@@ -85,69 +58,33 @@ export default function Home() {
           ))}
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-          <Card className="border-none bg-white/90 shadow-xl ring-1 ring-black/5 backdrop-blur dark:bg-slate-900/80 dark:ring-white/5">
-            <CardHeader>
-              <CardTitle>Activite des checks</CardTitle>
-              <CardDescription>Evolution des checks reussis et bloques (demo).</CardDescription>
-            </CardHeader>
-            <CardContent className="grid grid-cols-7 gap-2">
-              {[50, 72, 40, 88, 64, 92, 75].map((h, idx) => (
-                <div key={idx} className="flex flex-col items-center gap-2">
-                  <div className="h-40 w-8 rounded-md bg-slate-100 dark:bg-slate-800">
-                    <div
-                      className="w-full rounded-md bg-primary transition"
-                      style={{ height: `${h}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-muted-foreground">J{idx + 1}</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="border-none bg-white/90 shadow-xl ring-1 ring-black/5 backdrop-blur dark:bg-slate-900/80 dark:ring-white/5">
-            <CardHeader>
-              <CardTitle>Repartition</CardTitle>
-              <CardDescription>Accessibles vs bloques (demo).</CardDescription>
-            </CardHeader>
-            <CardContent className="flex items-center justify-center">
-              <div className="relative h-40 w-40">
-                <div className="absolute inset-0 rounded-full bg-primary/20" />
-                <div
-                  className="absolute inset-1 rounded-full bg-emerald-400/70"
-                  style={{ clipPath: "polygon(0 0, 100% 0, 100% 65%, 0 65%)" }}
-                />
-                <div className="absolute inset-4 rounded-full bg-white/90 dark:bg-slate-900/80" />
-                <div className="absolute inset-0 flex items-center justify-center text-sm font-semibold">
-                  87% OK
+        <Card className="border-none bg-white/90 shadow-xl ring-1 ring-black/5 backdrop-blur dark:bg-slate-900/80 dark:ring-white/5">
+          <CardHeader>
+            <CardTitle>Stats par module</CardTitle>
+            <CardDescription>
+              Vue synthetique des principaux modules (downtime, latence, blocages).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {moduleStats.map((m) => (
+              <div
+                key={m.name}
+                className="flex flex-col gap-2 rounded-lg border border-white/40 bg-white/80 p-4 text-sm shadow-sm transition hover:-translate-y-1 hover:shadow-md dark:border-white/10 dark:bg-slate-900/70"
+              >
+                <div className="text-xs uppercase tracking-wide text-muted-foreground">{m.name}</div>
+                <div className="text-lg font-semibold text-primary">{m.metric}</div>
+                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-1 font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-100">
+                    Disponibilite {m.uptime}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-1 font-semibold text-rose-700 dark:bg-rose-900/40 dark:text-rose-100">
+                    {m.blocked}
+                  </span>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {pages.map((page) => (
-            <Card
-              key={page.href}
-              className="border-none bg-white/80 shadow-lg ring-1 ring-black/5 transition hover:-translate-y-1 hover:shadow-xl dark:bg-slate-900/80 dark:ring-white/5"
-            >
-              <CardHeader className="flex flex-row items-start justify-between gap-4">
-                <div className="flex size-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  {page.icon}
-                </div>
-                <Button asChild variant="outline" size="sm">
-                  <Link href={page.href}>Ouvrir</Link>
-                </Button>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2 px-6 pb-6">
-                <CardTitle>{page.title}</CardTitle>
-                <CardDescription>{page.desc}</CardDescription>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+            ))}
+          </CardContent>
+        </Card>
       </div>
     </main>
   );

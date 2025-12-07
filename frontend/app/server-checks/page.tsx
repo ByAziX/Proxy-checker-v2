@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { fetchApps, fetchHistory, fetchHistorySummary, type App } from "@/lib/api";
 import { useUserStore } from "@/lib/store/userStore";
@@ -29,6 +30,7 @@ export default function ServerChecksPage() {
   const [lastRun, setLastRun] = useState<Date | null>(null);
   const [nextRun, setNextRun] = useState<Date | null>(null);
   const [remainingSec, setRemainingSec] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
 
   // Charger les apps par défaut
   useEffect(() => {
@@ -114,6 +116,17 @@ export default function ServerChecksPage() {
     return min > 0 ? `${min}m ${sec.toString().padStart(2, "0")}s` : `${sec}s`;
   }, [remainingSec]);
 
+  const filteredApps = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return apps;
+    return apps.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        (a.description || "").toLowerCase().includes(q) ||
+        (a.category || "").toLowerCase().includes(q)
+    );
+  }, [apps, search]);
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 px-6 py-10 font-sans text-foreground dark:from-slate-950 dark:via-slate-900 dark:to-black">
       <div className="mx-auto flex max-w-6xl flex-col gap-8">
@@ -133,6 +146,19 @@ export default function ServerChecksPage() {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex-1 min-w-[220px]">
+            <Input
+              placeholder="Rechercher une application (nom, description, categorie)"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {filteredApps.length} apps / {apps.length} (defaut)
+          </div>
+        </div>
+
         {error ? (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
             {error}
@@ -140,7 +166,7 @@ export default function ServerChecksPage() {
         ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          {apps.map((app) => {
+          {filteredApps.map((app) => {
             const entries = historyByApp[app.id] || [];
             const ok = entries.filter((h) => h.status === "reachable").length;
             const ko = entries.filter((h) => h.status === "blocked").length;
