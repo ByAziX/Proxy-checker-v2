@@ -1,102 +1,136 @@
-﻿"use client";
+"use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { serverCheck } from "@/lib/api";
-import { Loader2, Lock, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { fetchApps, fetchHistory, fetchHistorySummary, type App } from "@/lib/api";
+import { useUserStore } from "@/lib/store/userStore";
+import { cn } from "@/lib/utils";
+import { Chip } from "./chip";
+import { CloudAlert, Clock } from "lucide-react";
 
-type CheckResult = {
-  status: "idle" | "checking" | "reachable" | "blocked";
-  latencyMs?: number;
-  httpStatus?: number;
-  error?: string;
-};
-
-const normalizeUrl = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return "";
-  const withProtocol = trimmed.match(/^https?:\/\//i)
-    ? trimmed
-    : `https://${trimmed}`;
-  try {
-    const url = new URL(withProtocol);
-    return url.toString();
-  } catch {
-    return "";
-  }
+type HistoryEntry = {
+  at: string;
+  status: "reachable" | "blocked" | "checking" | "idle";
+  latencyMs?: number | null;
+  httpStatus?: number | null;
+  error?: string | null;
+  applicationId: number;
 };
 
 export default function ServerChecksPage() {
-  const [url, setUrl] = useState("https://example.com");
-  const [method, setMethod] = useState("GET");
-  const [result, setResult] = useState<CheckResult>({ status: "idle" });
+  const { token } = useUserStore();
+  const router = useRouter();
+
+  const [apps, setApps] = useState<App[]>([]);
+  const [historyByApp, setHistoryByApp] = useState<Record<number, HistoryEntry[]>>({});
   const [error, setError] = useState<string | null>(null);
+  const [lastRun, setLastRun] = useState<Date | null>(null);
+  const [nextRun, setNextRun] = useState<Date | null>(null);
+  const [remainingSec, setRemainingSec] = useState<number | null>(null);
 
-  const handleRun = async () => {
-    const normalized = normalizeUrl(url);
-    if (!normalized) {
-      setError("URL invalide");
-      return;
-    }
-    setError(null);
-    setResult({ status: "checking" });
+  // Charger les apps par défaut
+  useEffect(() => {
+    const loadApps = async () => {
+      setError(null);
+      try {
+        const { apps: data } = await fetchApps(token);
+        setApps(data.filter((a) => a.isDefault));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Chargement des applications impossible");
+      }
+    };
+    loadApps();
+  }, [token]);
 
+  // Charger l'historique agrégé
+  const refreshHistory = async () => {
     try {
-      const res = await serverCheck({ url: normalized, method });
-      setResult({
-        status: res.status,
-        latencyMs: res.latencyMs,
-        httpStatus: res.httpStatus,
-        error: res.error,
+      const { history } = await fetchHistory({ limit: 1000 });
+      const byApp: Record<number, HistoryEntry[]> = {};
+      history.forEach((h) => {
+        const entry: HistoryEntry = {
+          at: h.createdAt,
+          status: h.status as HistoryEntry["status"],
+          latencyMs: h.latencyMs,
+          httpStatus: h.httpStatus,
+          error: h.error,
+          applicationId: h.applicationId,
+        };
+        if (!byApp[h.applicationId]) byApp[h.applicationId] = [];
+        byApp[h.applicationId].push(entry);
       });
+      setHistoryByApp(byApp);
     } catch (err) {
-      setResult({
-        status: "blocked",
-        error: err instanceof Error ? err.message : "Echec serveur",
-      });
+      console.error(err);
     }
   };
 
-  const tone =
-    result.status === "reachable"
-      ? "text-emerald-600"
-      : result.status === "blocked"
-        ? "text-rose-600"
-        : "text-amber-600";
+  useEffect(() => {
+    refreshHistory();
+    const intervalId = window.setInterval(refreshHistory, 60000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
-  const icon =
-    result.status === "reachable" ? (
-      <ShieldCheck className="size-5 text-emerald-600" />
-    ) : result.status === "blocked" ? (
-      <ShieldAlert className="size-5 text-rose-600" />
-    ) : result.status === "checking" ? (
-      <Loader2 className="size-5 animate-spin text-amber-600" />
-    ) : (
-      <Lock className="size-5 text-muted-foreground" />
-    );
+  // Charger le dernier run côté backend pour afficher le compte à rebours
+  useEffect(() => {
+    const loadSummary = async () => {
+      try {
+        const { lastRun: lr, intervalMs } = await fetchHistorySummary();
+        if (lr) {
+          const lrDate = new Date(lr);
+          setLastRun(lrDate);
+          setNextRun(new Date(lrDate.getTime() + intervalMs));
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    loadSummary();
+    const id = window.setInterval(loadSummary, 60000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // Countdown
+  useEffect(() => {
+    const tick = () => {
+      if (!nextRun) {
+        setRemainingSec(null);
+        return;
+      }
+      const diff = Math.max(0, Math.floor((nextRun.getTime() - Date.now()) / 1000));
+      setRemainingSec(diff);
+    };
+    const id = window.setInterval(tick, 1000);
+    tick();
+    return () => window.clearInterval(id);
+  }, [nextRun]);
+
+  const formatCountdown = useMemo(() => {
+    if (remainingSec == null) return "Auto";
+    const min = Math.floor(remainingSec / 60);
+    const sec = remainingSec % 60;
+    return min > 0 ? `${min}m ${sec.toString().padStart(2, "0")}s` : `${sec}s`;
+  }, [remainingSec]);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 px-6 py-10 font-sans text-foreground dark:from-slate-950 dark:via-slate-900 dark:to-black">
-      <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      <div className="mx-auto flex max-w-6xl flex-col gap-8">
         <div className="space-y-2">
           <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
-            <Lock className="size-4" />
-            Checks depuis le serveur
+            <CloudAlert className="size-4" />
+            Down detector (serveur)
           </div>
-          <h1 className="text-4xl font-semibold leading-tight sm:text-5xl">Comparer l acces cote serveur</h1>
+          <h1 className="text-4xl font-semibold leading-tight sm:text-5xl">Etat des applications cote backend</h1>
           <p className="text-lg text-muted-foreground">
-            Lancer un fetch depuis le backend pour voir si le blocage est global ou limite au poste utilisateur.
+            Tests planifiés côté serveur toutes les 15 minutes. Les résultats sont stockés en base et partagés pour tous les
+            utilisateurs.
           </p>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Clock className="size-4" />
+            Dernier run : {lastRun ? lastRun.toLocaleTimeString() : "N/A"} • Prochain dans : {formatCountdown}
+          </div>
         </div>
 
         {error ? (
@@ -105,52 +139,76 @@ export default function ServerChecksPage() {
           </div>
         ) : null}
 
-        <Card className="border-none bg-white/90 shadow-lg ring-1 ring-black/5 backdrop-blur dark:bg-slate-900/80 dark:ring-white/5">
-          <CardHeader>
-            <CardTitle>URL a tester</CardTitle>
-            <CardDescription>Les requetes partent du conteneur backend.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2 sm:gap-4">
-            <div className="flex flex-col gap-1.5 sm:col-span-2">
-              <Label htmlFor="url">URL</Label>
-              <Input
-                id="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://example.com"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="method">Methode</Label>
-              <Input
-                id="method"
-                value={method}
-                onChange={(e) => setMethod(e.target.value)}
-                placeholder="GET"
-              />
-            </div>
-          </CardContent>
-          <CardFooter>
-            <Button className="gap-2" onClick={handleRun}>
-              <Lock className="size-4" /> Lancer
-            </Button>
-          </CardFooter>
-        </Card>
-
-        <Card className="border-none bg-white/90 shadow-lg ring-1 ring-black/5 backdrop-blur dark:bg-slate-900/80 dark:ring-white/5">
-          <CardHeader className="flex flex-row items-center gap-2">
-            {icon}
-            <CardTitle>Resultat</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2 text-sm text-muted-foreground">
-            <div className="flex items-center gap-2 text-base font-semibold text-foreground">
-              <span className={tone}>{result.status}</span>
-              {result.httpStatus ? <span>HTTP {result.httpStatus}</span> : null}
-              {result.latencyMs ? <span>{Math.round(result.latencyMs)} ms</span> : null}
-            </div>
-            {result.error ? <div className="text-rose-600">{result.error}</div> : null}
-          </CardContent>
-        </Card>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {apps.map((app) => {
+            const entries = historyByApp[app.id] || [];
+            const ok = entries.filter((h) => h.status === "reachable").length;
+            const ko = entries.filter((h) => h.status === "blocked").length;
+            const avg =
+              entries.filter((h) => typeof h.latencyMs === "number").reduce((acc, h) => acc + (h.latencyMs || 0), 0) /
+              Math.max(1, entries.filter((h) => typeof h.latencyMs === "number").length);
+            return (
+              <Card
+                key={app.id}
+                className="cursor-pointer border-none bg-white/90 shadow-lg ring-1 ring-black/5 backdrop-blur transition hover:-translate-y-1 hover:shadow-xl dark:bg-slate-900/80 dark:ring-white/5"
+                onClick={() => router.push(`/server-checks/${app.id}`)}
+              >
+                <CardHeader className="flex flex-row items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      {app.name}
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                        {app.category}
+                      </span>
+                    </CardTitle>
+                    <CardDescription>{app.description}</CardDescription>
+                    {entries.length ? (
+                      <div className="mt-2 flex flex-col gap-2 rounded-md bg-white/60 px-3 py-2 text-xs text-muted-foreground shadow-sm dark:bg-slate-900/60">
+                        <div className="font-semibold text-foreground">Vue globale</div>
+                        <div className="flex gap-1">
+                          {entries.slice(0, 16).map((h, idx) => (
+                            <div
+                              key={`${h.at}-bar-${idx}`}
+                              className={cn(
+                                "h-10 w-3 rounded-sm",
+                                h.status === "reachable"
+                                  ? "bg-emerald-400"
+                                  : h.status === "blocked"
+                                    ? "bg-rose-400"
+                                    : "bg-slate-300"
+                              )}
+                              title={`${new Date(h.at).toLocaleString()} • ${h.status}${
+                                h.httpStatus ? ` • HTTP ${h.httpStatus}` : ""
+                              }${typeof h.latencyMs === "number" ? ` • ${Math.round(h.latencyMs)} ms` : ""}${
+                                h.error ? ` • ${h.error}` : ""
+                              }`}
+                            />
+                          ))}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Chip label="OK" value={ok} tone="green" />
+                          <Chip label="KO" value={ko} tone="rose" />
+                          <Chip label="Lat. moy" value={Math.round(avg) || 0} suffix="ms" />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 text-xs text-muted-foreground">Aucun historique encore.</div>
+                    )}
+                  </div>
+                  <Button size="sm" variant="outline" disabled className="gap-2 opacity-60" title="Tests planifiés serveur">
+                    <Clock className="size-4" />
+                    {formatCountdown}
+                  </Button>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2">
+                  <div className="rounded-md border border-dashed border-muted-foreground/30 bg-white/70 px-3 py-2 text-xs text-muted-foreground dark:bg-slate-900/60">
+                    Vue globale. Clique pour ouvrir la fiche detaillee (historique complet + endpoints).
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
       </div>
     </main>
   );

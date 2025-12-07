@@ -185,6 +185,8 @@ export function serverCheck(input: {
   method?: string;
   payload?: string;
   contentType?: string;
+  applicationId?: number;
+  endpointId?: number;
 }) {
   return apiFetch<{
     status: "reachable" | "blocked";
@@ -193,4 +195,30 @@ export function serverCheck(input: {
     error?: string;
     url: string;
   }>("/server-check", { method: "POST", body: input });
+}
+
+export function fetchHistory(params?: { applicationId?: number; endpointId?: number; limit?: number }) {
+  const qs = new URLSearchParams();
+  if (params?.applicationId) qs.set("applicationId", String(params.applicationId));
+  if (params?.endpointId) qs.set("endpointId", String(params.endpointId));
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<{
+    history: Array<{
+      id: number;
+      applicationId: number;
+      endpointId: number;
+      status: string;
+      latencyMs?: number | null;
+      httpStatus?: number | null;
+      error?: string | null;
+      createdAt: string;
+      application: App;
+      endpoint: AppEndpoint;
+    }>;
+  }>(`/history${suffix}`);
+}
+
+export function fetchHistorySummary() {
+  return apiFetch<{ lastRun: string | null; intervalMs: number }>("/history/summary");
 }

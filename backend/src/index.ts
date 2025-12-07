@@ -24,6 +24,9 @@ const prisma = new PrismaClient(
 );
 const app = Fastify({ logger: true });
 
+const CHECK_INTERVAL_MS = 15 * 60 * 1000;
+let lastServerRefresh: Date | null = null;
+
 declare module "@fastify/jwt" {
   interface FastifyJWT {
     payload: { sub: number; email: string; name?: string };
@@ -571,6 +574,8 @@ app.post("/server-check", async (request, reply) => {
     method?: string;
     payload?: string;
     contentType?: string;
+    applicationId?: number;
+    endpointId?: number;
   } | null;
   const rawUrl = body?.url?.trim();
   if (!rawUrl) {
@@ -607,6 +612,18 @@ app.post("/server-check", async (request, reply) => {
     clearTimeout(timeoutId);
     const latencyMs = performance.now() - start;
 
+    if (body?.applicationId && body?.endpointId) {
+      await prisma.endpointCheckHistory.create({
+        data: {
+          applicationId: body.applicationId,
+          endpointId: body.endpointId,
+          status: response.ok ? "reachable" : "blocked",
+          latencyMs: Math.round(latencyMs),
+          httpStatus: response.status,
+        },
+      });
+    }
+
     reply.send({
       status: response.ok ? "reachable" : "blocked",
       httpStatus: response.status,
@@ -615,6 +632,17 @@ app.post("/server-check", async (request, reply) => {
     });
   } catch (error) {
     clearTimeout(timeoutId);
+    if (body?.applicationId && body?.endpointId) {
+      await prisma.endpointCheckHistory.create({
+        data: {
+          applicationId: body.applicationId,
+          endpointId: body.endpointId,
+          status: "blocked",
+          latencyMs: Math.round(performance.now() - start),
+          error: error instanceof Error ? error.message : "Echec serveur",
+        },
+      });
+    }
     reply.send({
       status: "blocked",
       error: error instanceof Error ? error.message : "Echec serveur",
@@ -624,9 +652,87 @@ app.post("/server-check", async (request, reply) => {
   }
 });
 
+app.get("/history", async (request, reply) => {
+  const query = request.query as { applicationId?: string; endpointId?: string; limit?: string } | null;
+  const applicationId = query?.applicationId ? Number(query.applicationId) : undefined;
+  const endpointId = query?.endpointId ? Number(query.endpointId) : undefined;
+  const limit = query?.limit ? Math.min(Number(query.limit), 500) : 200;
+
+  const history = await prisma.endpointCheckHistory.findMany({
+    where: {
+      applicationId: applicationId || undefined,
+      endpointId: endpointId || undefined,
+    },
+    include: {
+      application: true,
+      endpoint: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: Number.isNaN(limit) ? 200 : limit,
+  });
+
+  reply.send({ history });
+});
+
+app.get("/history/summary", async () => ({
+  lastRun: lastServerRefresh ? lastServerRefresh.toISOString() : null,
+  intervalMs: CHECK_INTERVAL_MS,
+}));
+
+async function runScheduledChecks() {
+  const apps = await prisma.application.findMany({
+    where: { isDefault: true },
+    include: { endpoints: true },
+  });
+  const endpoints = apps.flatMap((app) =>
+    app.endpoints.map((ep) => ({
+      appId: app.id,
+      epId: ep.id,
+      url: ep.url,
+    }))
+  );
+  for (const target of endpoints) {
+    const normalized = target.url.startsWith("http") ? target.url : `https://${target.url}`;
+    const controller = new AbortController();
+    const start = performance.now();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(normalized, { method: "GET", signal: controller.signal });
+      const latencyMs = Math.round(performance.now() - start);
+      clearTimeout(timeoutId);
+      await prisma.endpointCheckHistory.create({
+        data: {
+          applicationId: target.appId,
+          endpointId: target.epId,
+          status: res.ok ? "reachable" : "blocked",
+          latencyMs,
+          httpStatus: res.status,
+        },
+      });
+    } catch (error) {
+      clearTimeout(timeoutId);
+      await prisma.endpointCheckHistory.create({
+        data: {
+          applicationId: target.appId,
+          endpointId: target.epId,
+          status: "blocked",
+          latencyMs: Math.round(performance.now() - start),
+          error: error instanceof Error ? error.message : "Echec serveur",
+        },
+      });
+    }
+  }
+  lastServerRefresh = new Date();
+}
+
 async function start() {
   await ensureDefaultCategories();
   await ensureDefaultApps();
+  // lancer une premiere passe et planifier
+  runScheduledChecks().catch((err) => app.log.error(err));
+  setInterval(() => {
+    runScheduledChecks().catch((err) => app.log.error(err));
+  }, CHECK_INTERVAL_MS);
   app.listen({ port: 3001, host: "0.0.0.0" });
 }
 
