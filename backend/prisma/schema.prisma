@@ -6,11 +6,81 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model User {
-  id    Int     @id @default(autoincrement())
-  email String  @unique
-  name  String?
+  id           Int          @id @default(autoincrement())
+  email        String       @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime     @default(now())
+  targets      SiteTarget[]
+  applications Application[]
+}
+
+model Category {
+  id          Int          @id @default(autoincrement())
+  name        String       @unique
+  description String?
+  createdAt   DateTime     @default(now())
+  targets     SiteTarget[]
+}
+
+model SiteTarget {
+  id             Int        @id @default(autoincrement())
+  name           String
+  url            String
+  protectionType ProtectionType @default(PROXY)
+  notes          String?
+  tags           String?
+  categoryId     Int
+  category       Category   @relation(fields: [categoryId], references: [id])
+  createdById    Int?
+  createdBy      User?      @relation(fields: [createdById], references: [id])
+  createdAt      DateTime   @default(now())
+}
+
+model Application {
+  id          Int                    @id @default(autoincrement())
+  name        String                 @unique
+  description String?
+  category    AppCategory            @default(OTHER)
+  isDefault   Boolean                @default(false)
+  createdAt   DateTime               @default(now())
+  createdById Int?
+  createdBy   User?                  @relation(fields: [createdById], references: [id])
+  endpoints   ApplicationEndpoint[]
+}
+
+model ApplicationEndpoint {
+  id            Int            @id @default(autoincrement())
+  label         String
+  url           String
+  kind          EndpointKind   @default(WEB)
+  method        String?        // for APIs
+  notes         String?
+  applicationId Int
+  application   Application    @relation(fields: [applicationId], references: [id])
+  createdAt     DateTime       @default(now())
+}
+
+enum ProtectionType {
+  PROXY
+  DLP
+  THREAT
+  CUSTOM
+}
+
+enum EndpointKind {
+  WEB
+  API
+  FILE
+}
+
+enum AppCategory {
+  CLOUD_STORAGE
+  FILE_TRANSFER
+  SOCIAL_MEDIA
+  SAAS
+  OTHER
 }
